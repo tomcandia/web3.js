@@ -1,4 +1,4 @@
-require=(function(){function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s}return e})()({1:[function(require,module,exports){
+require=(function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
 module.exports=[
   {
     "constant": true,
@@ -2883,65 +2883,61 @@ var addEventsToContract = function (contract) {
  */
 var checkForContractAddress = function(contract, callback){
     var count = 0,
-        callbackFired = false;
+        callbackFired = false,
+        initialTime = new Date().getTime();
 
-    // wait for receipt
-    var filter = contract._eth.filter('latest', function(e){
-        if (!e && !callbackFired) {
-            count++;
-
-            // stop watching after 50 blocks (timeout)
-            if (count > 50) {
-
-                filter.stopWatching(function() {});
-                callbackFired = true;
-
-                if (callback)
-                    callback(new Error('Contract transaction couldn\'t be found after 50 blocks'));
-                else
-                    throw new Error('Contract transaction couldn\'t be found after 50 blocks');
-
-
-            } else {
-
-                contract._eth.getTransactionReceipt(contract.transactionHash, function(e, receipt){
-                    if(receipt && receipt.blockHash && !callbackFired) {
-
-                        contract._eth.getCode(receipt.contractAddress, function(e, code){
-                            /*jshint maxcomplexity: 6 */
-
-                            if(callbackFired || !code)
-                                return;
-
-                            filter.stopWatching(function() {});
-                            callbackFired = true;
-
-                            if(code.length > 3) {
-
-                                // console.log('Contract code deployed!');
-
-                                contract.address = receipt.contractAddress;
-
-                                // attach events and methods again after we have
-                                addFunctionsToContract(contract);
-                                addEventsToContract(contract);
-
-                                // call callback for the second time
-                                if(callback)
-                                    callback(null, contract);
-
-                            } else {
-                                if(callback)
-                                    callback(new Error('The contract code couldn\'t be stored, please check your gas amount.'));
-                                else
-                                    throw new Error('The contract code couldn\'t be stored, please check your gas amount.');
-                            }
-                        });
-                    }
-                });
-            }
+    var errorHandler = function(msg) {
+        if(callback) {
+            callback(new Error(msg));
+        } else {
+            throw new Error(msg);
         }
-    });
+    }
+
+    var getReceipt = function() {
+        var time = new Date().getTime();
+        if(time - initialTime > 30000) {
+            errorHandler('Contract transaction couldn\'t be found after 30 seconds');
+            return;
+        }
+
+        contract._eth.getTransactionReceipt(contract.transactionHash, function(e, receipt) {
+            if(e) {
+                errorHandler(e);
+                return;
+            }
+
+            if(!receipt) {
+                setTimeout(getReceipt, 50); // Try again in 50 ms
+                return;
+            }
+
+            contract._eth.getCode(receipt.contractAddress, function(e, code) {
+                if(e) {
+                    errorHandler(e);
+                    return;
+                }
+
+                if(!code || code === '0x') {
+                    errorHandler('The contract code couldn\'t be stored, please check your gas amount.');
+                    return;
+                }
+
+                contract.address = receipt.contractAddress;
+
+                addFunctionsToContract(contract);
+                addEventsToContract(contract);
+
+                // call callback for the second time
+                if(callback) {
+                    callback(null, contract);
+                }
+            });
+        });
+    }
+
+    getReceipt();
+
 };
 
 /**
